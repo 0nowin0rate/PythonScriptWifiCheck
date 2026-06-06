@@ -16,8 +16,11 @@ clicks the centre of the page to accept and connect — no credentials needed.
 """
 
 import logging
+import shutil
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import requests
 from selenium import webdriver
@@ -47,6 +50,34 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger(__name__)
+
+# Candidate Firefox binary paths, in order of preference.
+_FIREFOX_CANDIDATES = [
+    "/snap/firefox/current/usr/lib/firefox/firefox",  # snap (Ubuntu 22+)
+    "/usr/bin/firefox",
+    "/usr/bin/firefox-esr",
+    "/usr/lib/firefox/firefox",
+]
+
+
+def _find_firefox() -> str:
+    """Return the first usable Firefox binary path, or raise RuntimeError."""
+    for path in _FIREFOX_CANDIDATES:
+        if Path(path).is_file():
+            return path
+    # Last resort: let the shell find it
+    found = shutil.which("firefox") or shutil.which("firefox-esr")
+    if found:
+        # Resolve symlinks (snap wrapper → real binary)
+        try:
+            real = subprocess.check_output(["readlink", "-f", found], text=True).strip()
+            if Path(real).is_file():
+                return real
+        except subprocess.SubprocessError:
+            return found
+    raise RuntimeError(
+        "Could not find a Firefox binary. Install Firefox or set options.binary_location manually."
+    )
 
 
 def is_connected() -> bool:
@@ -78,6 +109,10 @@ def attempt_login() -> bool:
     options = Options()
     # Remove the line below if you want to watch the browser window open.
     # options.add_argument("--headless")
+
+    firefox_bin = _find_firefox()
+    log.info("Using Firefox binary: %s", firefox_bin)
+    options.binary_location = firefox_bin
 
     driver = webdriver.Firefox(options=options)
     try:
