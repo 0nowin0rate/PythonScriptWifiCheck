@@ -17,7 +17,6 @@ No credentials needed.
 """
 
 import logging
-import subprocess
 import sys
 import time
 
@@ -27,8 +26,10 @@ from playwright.sync_api import sync_playwright
 # ---------------------------------------------------------------------------
 # Configuration — edit these to match your network
 # ---------------------------------------------------------------------------
-# URL used to verify real internet access (needs DNS — only checked when testing
-# whether we're already through the portal).
+# The Arista captive portal controller IP (uamip). Navigating here always
+# serves a fresh guest acceptance page regardless of changing challenge tokens.
+PORTAL_URL = "http://192.0.2.254"
+# URL used to verify real internet access after accepting the portal.
 CONNECTIVITY_TEST_URL = "http://neverssl.com"
 CONNECTIVITY_TIMEOUT = 10           # seconds
 PORTAL_LOAD_WAIT_MS = 5_000         # ms to wait for guest portal page to render
@@ -49,20 +50,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def _default_gateway() -> str | None:
-    """Return the default gateway IP address, or None if it can't be found."""
-    try:
-        out = subprocess.check_output(["ip", "route"], text=True)
-        for line in out.splitlines():
-            # e.g. "default via 192.168.1.1 dev wlan0 ..."
-            parts = line.split()
-            if parts and parts[0] == "default" and "via" in parts:
-                return parts[parts.index("via") + 1]
-    except (subprocess.SubprocessError, ValueError, IndexError):
-        pass
-    return None
-
-
 def is_connected() -> bool:
     """Return True when we can reach the open internet."""
     try:
@@ -74,28 +61,19 @@ def is_connected() -> bool:
 
 def attempt_connect() -> bool:
     """
-    Open Firefox via Playwright, navigate directly to the gateway IP (works
-    before DNS is available), wait for the guest portal page, click the centre,
-    then return whether connected.
+    Open Firefox via Playwright, navigate to the Arista captive portal
+    controller (PORTAL_URL), click the centre to accept, then return
+    whether connected.
     """
-    gateway = _default_gateway()
-    if gateway:
-        portal_url = f"http://{gateway}"
-        log.info("Default gateway detected: %s", gateway)
-    else:
-        # Fallback — some portals intercept any HTTP request
-        portal_url = "http://192.168.1.1"
-        log.warning("Could not detect gateway — falling back to %s", portal_url)
-
     log.info("Opening Firefox to accept guest WiFi portal …")
     with sync_playwright() as p:
         browser = p.firefox.launch(headless=False)
         try:
             page = browser.new_page()
             # Use commit so we don't wait for full page load (portal may redirect)
-            page.goto(portal_url, wait_until="commit")
+            page.goto(PORTAL_URL, wait_until="commit")
             log.info("Navigated to %s — waiting %dms for guest portal page …",
-                     portal_url, PORTAL_LOAD_WAIT_MS)
+                     PORTAL_URL, PORTAL_LOAD_WAIT_MS)
             page.wait_for_timeout(PORTAL_LOAD_WAIT_MS)
 
             log.info("Current URL after load: %s", page.url)
