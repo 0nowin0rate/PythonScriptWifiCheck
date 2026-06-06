@@ -42,8 +42,7 @@ NETWORK_BTN_WAIT     = 8    # seconds to wait for the network login button to ap
 CONNECT_PAGE_WAIT    = 6    # seconds to wait for the portal page to load
 POST_CONNECT_WAIT    = 8    # seconds to wait after clicking Connect
 
-CHECK_INTERVAL_HOURS   = 12
-CHECK_INTERVAL_SECONDS = CHECK_INTERVAL_HOURS * 3600
+CHECK_INTERVAL_SECONDS = (24 * 3600) + (5 * 60)  # 24 hours and 5 minutes
 # ---------------------------------------------------------------------------
 
 CONNECTIVITY_TEST_URL = "http://neverssl.com"
@@ -121,16 +120,16 @@ def run() -> None:
     if not _check_coords():
         sys.exit(1)
 
-    log.info("WiFi auto-connect daemon started (check interval: %dh)", CHECK_INTERVAL_HOURS)
+    log.info("WiFi auto-connect daemon started (check interval: 24h 5m)")
     while True:
         if is_connected():
-            log.info("Already connected. Sleeping %dh …", CHECK_INTERVAL_HOURS)
+            log.info("Already connected. Sleeping 24h 5m …")
             time.sleep(CHECK_INTERVAL_SECONDS)
         else:
             log.warning("Not connected — starting connect sequence …")
             success = attempt_connect()
             if success:
-                log.info("Connected. Sleeping %dh …", CHECK_INTERVAL_HOURS)
+                log.info("Connected. Sleeping 24h 5m …")
                 time.sleep(CHECK_INTERVAL_SECONDS)
             else:
                 log.error("Failed. Retrying in 60 s …")
