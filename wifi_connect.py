@@ -7,12 +7,12 @@
 # ]
 # ///
 """
-Captive-portal WiFi auto-connector.
+Guest WiFi captive-portal auto-connector.
 
 Runs in a loop: checks internet connectivity every 12 hours.
 When offline (captive portal detected), opens Firefox, navigates to a
-plain HTTP URL so the router redirects to the login page, then clicks
-the centre of the page to trigger authentication.
+plain HTTP URL so the router redirects to the guest acceptance page, then
+clicks the centre of the page to accept and connect — no credentials needed.
 """
 
 import logging
@@ -71,10 +71,10 @@ def click_centre_of_page(driver: webdriver.Firefox) -> None:
 
 def attempt_login() -> bool:
     """
-    Open Firefox, navigate to CHECK_URL (which should redirect to the captive
-    portal), click the centre, then return whether we are now connected.
+    Open Firefox, navigate to CHECK_URL (which should redirect to the guest
+    acceptance page), click the centre to accept, then return whether connected.
     """
-    log.info("Opening Firefox to trigger captive-portal login …")
+    log.info("Opening Firefox to accept guest WiFi portal …")
     options = Options()
     # Remove the line below if you want to watch the browser window open.
     # options.add_argument("--headless")
@@ -82,14 +82,14 @@ def attempt_login() -> bool:
     driver = webdriver.Firefox(options=options)
     try:
         driver.get(CHECK_URL)
-        log.info("Navigated to %s — waiting %ds for login page …", CHECK_URL, LOGIN_PAGE_LOAD_WAIT)
+        log.info("Navigated to %s — waiting %ds for guest portal page …", CHECK_URL, LOGIN_PAGE_LOAD_WAIT)
         time.sleep(LOGIN_PAGE_LOAD_WAIT)
 
         current_url = driver.current_url
         log.info("Current URL after load: %s", current_url)
 
         click_centre_of_page(driver)
-        log.info("Clicked centre — waiting %ds for authentication …", POST_CLICK_WAIT)
+        log.info("Clicked centre — waiting %ds for connection …", POST_CLICK_WAIT)
         time.sleep(POST_CLICK_WAIT)
 
         connected = is_connected()

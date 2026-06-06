@@ -1,9 +1,9 @@
 # WiFi Auto-Connect
 
-Automatically handles captive-portal WiFi login on a Desktop PC.  
+Automatically connects to a guest captive-portal WiFi network on a Desktop PC.  
 Every 12 hours it checks whether you are connected; if not it opens Firefox,
-navigates to the captive-portal login page, and clicks the centre of the page
-to authenticate.
+navigates to the guest acceptance page, and clicks the centre of the page to connect.
+No username or password required.
 
 ## Requirements
 
@@ -40,7 +40,7 @@ Create `/etc/systemd/system/wifi-connect.service`:
 
 ```ini
 [Unit]
-Description=WiFi captive-portal auto-connect
+Description=Guest WiFi captive-portal auto-connect
 After=network.target
 
 [Service]
@@ -71,9 +71,9 @@ Edit the constants at the top of `wifi_connect.py`:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CHECK_URL` | `http://neverssl.com` | URL Firefox opens (must be plain HTTP) |
+| `CHECK_URL` | `http://neverssl.com` | URL Firefox opens (must be plain HTTP so the portal intercepts it) |
 | `CONNECTIVITY_TEST_URL` | `http://neverssl.com` | URL used for the connectivity check |
-| `LOGIN_PAGE_LOAD_WAIT` | `5` s | Time to wait for the login page to render |
+| `LOGIN_PAGE_LOAD_WAIT` | `5` s | Time to wait for the guest portal page to render |
 | `POST_CLICK_WAIT` | `10` s | Time to wait after clicking before re-checking |
 | `CHECK_INTERVAL_HOURS` | `12` | How often to re-check connectivity |
 
