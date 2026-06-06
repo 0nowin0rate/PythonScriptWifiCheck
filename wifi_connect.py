@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "selenium>=4.0",
+#   "playwright>=1.40",
 #   "requests>=2.28",
 # ]
 # ///
@@ -10,32 +10,27 @@
 Guest WiFi captive-portal auto-connector.
 
 Runs in a loop: checks internet connectivity every 12 hours.
-When offline (captive portal detected), opens Firefox, navigates to a
-plain HTTP URL so the router redirects to the guest acceptance page, then
-clicks the centre of the page to accept and connect — no credentials needed.
+When offline (captive portal detected), opens Firefox via Playwright,
+navigates to a plain HTTP URL so the router redirects to the guest
+acceptance page, then clicks the centre of the page to connect.
+No credentials needed.
 """
 
 import logging
-import shutil
-import subprocess
 import sys
 import time
-from pathlib import Path
 
 import requests
-from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.service import Service
+from playwright.sync_api import sync_playwright
 
 # ---------------------------------------------------------------------------
 # Configuration — edit these to match your network
 # ---------------------------------------------------------------------------
-CHECK_URL = "http://neverssl.com"          # plain HTTP so captive portals intercept it
+CHECK_URL = "http://neverssl.com"   # plain HTTP so captive portals intercept it
 CONNECTIVITY_TEST_URL = "http://neverssl.com"
-CONNECTIVITY_TIMEOUT = 10                  # seconds
-LOGIN_PAGE_LOAD_WAIT = 5                   # seconds to let the login page render
-POST_CLICK_WAIT = 10                       # seconds to wait after clicking before re-check
+CONNECTIVITY_TIMEOUT = 10           # seconds
+PORTAL_LOAD_WAIT_MS = 5_000         # ms to wait for guest portal page to render
+POST_CLICK_WAIT = 10                # seconds to wait after clicking before re-check
 CHECK_INTERVAL_HOURS = 12
 CHECK_INTERVAL_SECONDS = CHECK_INTERVAL_HOURS * 3600
 # ---------------------------------------------------------------------------
@@ -51,87 +46,49 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# Candidate Firefox binary paths, in order of preference.
-_FIREFOX_CANDIDATES = [
-    "/snap/firefox/current/usr/lib/firefox/firefox",  # snap (Ubuntu 22+)
-    "/usr/bin/firefox",
-    "/usr/bin/firefox-esr",
-    "/usr/lib/firefox/firefox",
-]
-
-
-def _find_firefox() -> str:
-    """Return the first usable Firefox binary path, or raise RuntimeError."""
-    for path in _FIREFOX_CANDIDATES:
-        if Path(path).is_file():
-            return path
-    # Last resort: let the shell find it
-    found = shutil.which("firefox") or shutil.which("firefox-esr")
-    if found:
-        # Resolve symlinks (snap wrapper → real binary)
-        try:
-            real = subprocess.check_output(["readlink", "-f", found], text=True).strip()
-            if Path(real).is_file():
-                return real
-        except subprocess.SubprocessError:
-            return found
-    raise RuntimeError(
-        "Could not find a Firefox binary. Install Firefox or set options.binary_location manually."
-    )
-
 
 def is_connected() -> bool:
     """Return True when we can reach the open internet."""
     try:
         r = requests.get(CONNECTIVITY_TEST_URL, timeout=CONNECTIVITY_TIMEOUT, allow_redirects=False)
-        # A captive portal typically redirects; a real response means we're through.
         return r.status_code == 200
     except requests.RequestException:
         return False
 
 
-def click_centre_of_page(driver: webdriver.Firefox) -> None:
-    """Click the geometric centre of whatever page is currently loaded."""
-    width = driver.execute_script("return document.documentElement.scrollWidth")
-    height = driver.execute_script("return document.documentElement.scrollHeight")
-    centre_x = width // 2
-    centre_y = height // 2
-    log.info("Page size %dx%d — clicking centre (%d, %d)", width, height, centre_x, centre_y)
-    ActionChains(driver).move_by_offset(centre_x, centre_y).click().perform()
-
-
-def attempt_login() -> bool:
+def attempt_connect() -> bool:
     """
-    Open Firefox, navigate to CHECK_URL (which should redirect to the guest
-    acceptance page), click the centre to accept, then return whether connected.
+    Open Firefox via Playwright, navigate to CHECK_URL (redirects to the
+    guest portal), click the centre of the page, then return whether connected.
     """
     log.info("Opening Firefox to accept guest WiFi portal …")
-    options = Options()
-    # Remove the line below if you want to watch the browser window open.
-    # options.add_argument("--headless")
+    with sync_playwright() as p:
+        browser = p.firefox.launch(headless=False)
+        try:
+            page = browser.new_page()
+            page.goto(CHECK_URL)
+            log.info("Navigated to %s — waiting %dms for guest portal page …",
+                     CHECK_URL, PORTAL_LOAD_WAIT_MS)
+            page.wait_for_timeout(PORTAL_LOAD_WAIT_MS)
 
-    firefox_bin = _find_firefox()
-    log.info("Using Firefox binary: %s", firefox_bin)
-    options.binary_location = firefox_bin
+            log.info("Current URL after load: %s", page.url)
 
-    driver = webdriver.Firefox(options=options)
-    try:
-        driver.get(CHECK_URL)
-        log.info("Navigated to %s — waiting %ds for guest portal page …", CHECK_URL, LOGIN_PAGE_LOAD_WAIT)
-        time.sleep(LOGIN_PAGE_LOAD_WAIT)
+            vw = page.viewport_size
+            cx = vw["width"] // 2
+            cy = vw["height"] // 2
+            log.info("Viewport %dx%d — clicking centre (%d, %d)",
+                     vw["width"], vw["height"], cx, cy)
+            page.mouse.click(cx, cy)
 
-        current_url = driver.current_url
-        log.info("Current URL after load: %s", current_url)
+            log.info("Clicked centre — waiting %ds for connection …", POST_CLICK_WAIT)
+            time.sleep(POST_CLICK_WAIT)
 
-        click_centre_of_page(driver)
-        log.info("Clicked centre — waiting %ds for connection …", POST_CLICK_WAIT)
-        time.sleep(POST_CLICK_WAIT)
-
-        connected = is_connected()
-        log.info("Post-click connectivity check: %s", "CONNECTED" if connected else "STILL OFFLINE")
-        return connected
-    finally:
-        driver.quit()
+            connected = is_connected()
+            log.info("Post-click connectivity check: %s",
+                     "CONNECTED" if connected else "STILL OFFLINE")
+            return connected
+        finally:
+            browser.close()
 
 
 def run() -> None:
@@ -141,13 +98,13 @@ def run() -> None:
             log.info("Already connected to the internet. Sleeping %dh …", CHECK_INTERVAL_HOURS)
             time.sleep(CHECK_INTERVAL_SECONDS)
         else:
-            log.warning("Not connected — attempting captive-portal login …")
-            success = attempt_login()
+            log.warning("Not connected — attempting guest portal connect …")
+            success = attempt_connect()
             if success:
-                log.info("Login succeeded. Sleeping %dh …", CHECK_INTERVAL_HOURS)
+                log.info("Connected successfully. Sleeping %dh …", CHECK_INTERVAL_HOURS)
                 time.sleep(CHECK_INTERVAL_SECONDS)
             else:
-                log.error("Login attempt failed. Retrying in 60 s …")
+                log.error("Connection attempt failed. Retrying in 60 s …")
                 time.sleep(60)
 
 

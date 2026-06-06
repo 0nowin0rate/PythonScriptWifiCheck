@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Captive-portal WiFi auto-connector using Firefox + Selenium"
 requires-python = ">=3.10"
 dependencies = [
-    "selenium>=4.0",
+    "playwright>=1.40",
     "requests>=2.28",
 ]
 
